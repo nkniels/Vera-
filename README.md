@@ -51,7 +51,7 @@ python main.py
 Required environment variables in `.env`:
 
 - `GROQ_API_KEY`: Your Groq API key
-- `AIRTABLE_API_KEY`: Your Airtable API key
+- `AIRTABLE_PAT`: Your Airtable Personal Access Token (PAT)
 - `AIRTABLE_BASE_ID`: Your Airtable Base ID
 - `GMAIL_ADDRESS`: Gmail address for escalation emails
 - `GMAIL_APP_PASSWORD`: Gmail app password for SMTP

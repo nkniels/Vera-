@@ -6,11 +6,11 @@ load_dotenv()
 
 class AirtableIntegration:
     def __init__(self):
-        self.api_key = os.getenv('AIRTABLE_API_KEY')
+        self.api_key = os.getenv('AIRTABLE_PAT')  # Personal Access Token
         self.base_id = os.getenv('AIRTABLE_BASE_ID')
         
         if not self.api_key or not self.base_id:
-            raise ValueError("AIRTABLE_API_KEY and AIRTABLE_BASE_ID must be set in .env")
+            raise ValueError("AIRTABLE_PAT and AIRTABLE_BASE_ID must be set in .env")
         
         self.api = Api(self.api_key)
         self.base = self.api.base(self.base_id)
