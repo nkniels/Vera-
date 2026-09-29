@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+groq
+chromadb
+pyairtable
+python-dotenv
+requests
