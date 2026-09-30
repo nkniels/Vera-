@@ -11,7 +11,14 @@ load_dotenv()
 
 class VeraChatbot:
     def __init__(self):
-        self.groq_client = Groq(api_key=os.getenv('GROQ_API_KEY'))
+        try:
+            self.groq_client = Groq(api_key=os.getenv('GROQ_API_KEY'))
+            self.groq_available = True
+        except Exception as e:
+            print(f"Warning: Could not initialize Groq client: {e}")
+            self.groq_client = None
+            self.groq_available = False
+            
         self.kb = get_knowledge_base()
         self.airtable = get_airtable()
         self.escalation = get_escalation_service()
@@ -20,43 +27,43 @@ class VeraChatbot:
         
         # Intent definitions with trigger keywords
         self.intents = {
-            'Q1_PRODUCT_CATALOGUE': {
+            'Q1': {
                 'keywords': ['what products', 'what do you sell', 'show me', 'product list', 'catalogue'],
                 'action': 'query_knowledge'
             },
-            'Q2_PRICING': {
+            'Q2': {
                 'keywords': ['how much', 'price', 'cost', 'afford', 'expensive', 'cheap'],
                 'action': 'query_knowledge'
             },
-            'Q3_PRODUCT_MATCHING': {
+            'Q3': {
                 'keywords': ['what should i use', 'skin type', 'recommend', 'suggest', 'best for my skin'],
                 'action': 'quiz_handoff'
             },
-            'Q4_INGREDIENTS': {
+            'Q4': {
                 'keywords': ['natural', 'clean', 'ingredients', 'chemicals', 'paraben', 'sulfate'],
                 'action': 'query_knowledge'
             },
-            'Q5_ORDER_STATUS': {
+            'Q5': {
                 'keywords': ['where is my order', 'order status', 'tracking', 'my order'],
                 'action': 'query_order'
             },
-            'Q6_DELIVERY_TIME': {
+            'Q6': {
                 'keywords': ['when will it arrive', 'how long', 'delivery', 'arrival', 'shipping to'],
                 'action': 'query_delivery'
             },
-            'Q7_RETURNS': {
+            'Q7': {
                 'keywords': ['return', 'refund', 'exchange', 'wrong item', 'damaged', 'sent wrong'],
                 'action': 'returns_handoff'
             },
-            'Q8_SHIPPING_DESTINATIONS': {
+            'Q8': {
                 'keywords': ['do you ship to', 'shipping to', 'deliver to', 'available in'],
                 'action': 'query_knowledge'
             },
-            'Q9_SHIPPING_TIME': {
+            'Q9': {
                 'keywords': ['how long does shipping take', 'shipping time', 'delivery time'],
                 'action': 'query_knowledge'
             },
-            'Q10_COMPLAINTS': {
+            'Q10': {
                 'keywords': ['angry', 'frustrated', 'terrible', 'damaged my skin', 'unacceptable', 'hate', 'worst'],
                 'action': 'escalate'
             }
@@ -94,6 +101,9 @@ Use the provided knowledge base context to answer questions accurately. If you d
     
     def generate_response(self, message: str, context: str = "") -> str:
         """Generate AI response using Groq API"""
+        if not self.groq_available:
+            return "I'm currently unable to generate AI responses. Please try again later or contact our support team directly."
+            
         try:
             messages = [
                 {"role": "system", "content": self.system_prompt}

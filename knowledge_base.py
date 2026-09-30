@@ -1,10 +1,21 @@
-import chromadb
-from chromadb.config import Settings
 import os
 from pathlib import Path
 
+try:
+    import chromadb
+    from chromadb.config import Settings
+    CHROMADB_AVAILABLE = True
+except ImportError:
+    CHROMADB_AVAILABLE = False
+    print("Warning: ChromaDB not installed. Knowledge base queries will be disabled.")
+
 class KnowledgeBase:
     def __init__(self):
+        if not CHROMADB_AVAILABLE:
+            self.client = None
+            self.collection = None
+            return
+            
         self.client = chromadb.PersistentClient(path="./chroma_db")
         self.collection = self.client.get_or_create_collection(
             name="vera_knowledge",
@@ -13,6 +24,10 @@ class KnowledgeBase:
         self._load_knowledge()
 
     def _load_knowledge(self):
+        if not CHROMADB_AVAILABLE:
+            print("ChromaDB not available - skipping knowledge base loading")
+            return
+            
         knowledge_path = Path(__file__).parent / "knowledge" / "vera_knowledge.md"
         
         if not knowledge_path.exists():
@@ -51,6 +66,10 @@ class KnowledgeBase:
         print(f"Loaded {len(documents)} knowledge sections into ChromaDB")
 
     def query(self, query_text: str, n_results: int = 3):
+        if not CHROMADB_AVAILABLE:
+            print("ChromaDB not available - returning empty results")
+            return []
+            
         results = self.collection.query(
             query_texts=[query_text],
             n_results=n_results
