@@ -14,9 +14,10 @@ conversation_states: Dict[str, Dict] = {}
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
-    channel: Optional[str] = "shopify"
+    channel: Optional[str] = "Shopify"
     customer_id: Optional[str] = None
     order_id: Optional[str] = None
+    lead_id: Optional[str] = None
 
 class WhatsAppMessage(BaseModel):
     from_: str
@@ -50,22 +51,28 @@ async def chat(request: ChatRequest):
         # Update conversation state
         conversation_states[session_id] = result['state']
         
-        # Write to Airtable
+        # Write to Airtable - match exact field names from schema
         airtable_data = {
             "Channel": request.channel,
             "Customer Message": request.message,
             "Vera Response (AI Draft)": result['response'],
             "Intent / Query Type": result['intent'],
-            "Conversation Status": result['state'].get('conversation_status', 'IN_PROGRESS'),
+            "Conversation Status": result['state'].get('conversation_status', 'Pending'),
             "Escalation Flag": result['state'].get('escalation_flag', False),
             "Escalation Transcript": result['state'].get('transcript', '') if result['state'].get('escalation_flag') else ""
         }
         
+        # Link to Customer if customer_id provided
         if request.customer_id:
-            airtable_data["Customer ID"] = request.customer_id
+            airtable_data["Customer"] = [request.customer_id]
         
+        # Link to Order if order_id provided
         if request.order_id:
-            airtable_data["Order ID"] = request.order_id
+            airtable_data["Order"] = [request.order_id]
+        
+        # Link to Lead if lead_id provided
+        if request.lead_id:
+            airtable_data["Lead"] = [request.lead_id]
         
         airtable.write_conversation("Vera Chatbot", airtable_data)
         
@@ -114,13 +121,13 @@ async def whatsapp_webhook(request: Request):
         # Update conversation state
         conversation_states[from_number] = result['state']
         
-        # Write to Airtable
+        # Write to Airtable - match exact field names from schema
         airtable_data = {
             "Channel": "WhatsApp",
             "Customer Message": message,
             "Vera Response (AI Draft)": result['response'],
             "Intent / Query Type": result['intent'],
-            "Conversation Status": result['state'].get('conversation_status', 'IN_PROGRESS'),
+            "Conversation Status": result['state'].get('conversation_status', 'Pending'),
             "Escalation Flag": result['state'].get('escalation_flag', False),
             "Escalation Transcript": result['state'].get('transcript', '') if result['state'].get('escalation_flag') else ""
         }
@@ -171,13 +178,13 @@ async def instagram_webhook(request: Request):
         # Update conversation state
         conversation_states[from_user] = result['state']
         
-        # Write to Airtable
+        # Write to Airtable - match exact field names from schema
         airtable_data = {
             "Channel": "Instagram DM",
             "Customer Message": message,
             "Vera Response (AI Draft)": result['response'],
             "Intent / Query Type": result['intent'],
-            "Conversation Status": result['state'].get('conversation_status', 'IN_PROGRESS'),
+            "Conversation Status": result['state'].get('conversation_status', 'Pending'),
             "Escalation Flag": result['state'].get('escalation_flag', False),
             "Escalation Transcript": result['state'].get('transcript', '') if result['state'].get('escalation_flag') else ""
         }

@@ -120,10 +120,21 @@ Vera classifies messages into these intents:
 - **Q4**: Ingredients/natural product questions
 - **Q5**: Order status queries
 - **Q6**: Delivery time inquiries
-- **Q7**: Returns/Refunds (triggers Make.com webhook)
+- **Q7**: Returns/Refunds (writes to Returns & Refunds table + Make.com webhook)
 - **Q8**: Shipping destination questions
 - **Q9**: Shipping time questions
 - **Q10**: Complaints/anger (triggers escalation)
+
+## Airtable Schema
+
+The bot integrates with the following Airtable tables:
+
+- **Vera Chatbot**: Logs all conversations with intent, status, and escalation flags
+- **Orders**: Query order status by Order ID
+- **Customers**: Link customer records to conversations
+- **Leads**: Link lead records to conversations
+- **Returns & Refunds**: Auto-approve return requests with status "Auto Approved"
+- **Products**: Track product recommendations
 
 ## License
 

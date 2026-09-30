@@ -52,6 +52,20 @@ class AirtableIntegration:
         except Exception as e:
             print(f"Error querying customer: {e}")
             return None
+    
+    def get_lead_record(self, table_name: str, lead_id: str):
+        """Get lead record by ID"""
+        try:
+            table = self.base.table(table_name)
+            formula = f"{{Lead ID}} = '{lead_id}'"
+            records = table.all(formula=formula)
+            
+            if records:
+                return records[0]
+            return None
+        except Exception as e:
+            print(f"Error querying lead: {e}")
+            return None
 
 # Singleton instance
 _airtable_instance = None

@@ -140,10 +140,10 @@ Use the provided knowledge base context to answer questions accurately. If you d
         
         if result and 'recommendation' in result:
             response = f"Based on your answers, I recommend: {result['recommendation']}"
-            return response, 'RESOLVED'
+            return response, 'Resolved'
         else:
             response = "I'm having trouble getting your personalized recommendation. Let me escalate this to our support team. ESCALATE_VERA"
-            return response, 'ESCALATE'
+            return response, 'Escalated'
     
     def handle_query_order(self, message: str) -> tuple:
         """Handle Q5 - Order status query"""
@@ -157,10 +157,10 @@ Use the provided knowledge base context to answer questions accurately. If you d
         if order_data:
             status = order_data.get('Order Status', 'Unknown')
             response = f"Your order {order_id} status is: {status}"
-            return response, 'RESOLVED'
+            return response, 'Resolved'
         else:
             response = "I couldn't find that order number. Let me escalate this to our support team for assistance. ESCALATE_VERA"
-            return response, 'ESCALATE'
+            return response, 'Escalated'
     
     def handle_query_delivery(self, message: str) -> tuple:
         """Handle Q6 - Delivery time query"""
@@ -180,10 +180,10 @@ Use the provided knowledge base context to answer questions accurately. If you d
         
         if success:
             response = "Your return request has been submitted. Our team will process it within 2 business days."
-            return response, 'RESOLVED'
+            return response, 'Resolved'
         else:
             response = "I'm having trouble submitting your return request. Let me escalate this to our support team. ESCALATE_VERA"
-            return response, 'ESCALATE'
+            return response, 'Escalated'
     
     def handle_escalation(self, message: str, transcript: str) -> tuple:
         """Handle escalation logic"""
@@ -191,7 +191,7 @@ Use the provided knowledge base context to answer questions accurately. If you d
         self.escalation.send_escalation_email(transcript, reference, message)
         
         response = f"I have flagged your case to our support team. Reference: #{reference}. Someone will contact you within 24 hours."
-        return response, 'ESCALATED'
+        return response, 'Escalated'
     
     def process_message(self, message: str, conversation_state: dict = None) -> dict:
         """Main message processing function"""
@@ -254,22 +254,22 @@ Use the provided knowledge base context to answer questions accurately. If you d
             # Normal intent handling
             if action == 'query_knowledge':
                 response, status = self.handle_query_knowledge(message)
-                new_state['conversation_status'] = 'RESOLVED'
+                new_state['conversation_status'] = 'Resolved'
             elif action == 'quiz_handoff':
                 response, status = self.handle_quiz_handoff(message)
                 new_state['state'] = status
-                new_state['conversation_status'] = 'IN_PROGRESS'
+                new_state['conversation_status'] = 'Pending'
             elif action == 'query_order':
                 response, status = self.handle_query_order(message)
                 new_state['state'] = status
-                new_state['conversation_status'] = 'IN_PROGRESS'
+                new_state['conversation_status'] = 'Pending'
             elif action == 'query_delivery':
                 response, status = self.handle_query_delivery(message)
-                new_state['conversation_status'] = 'RESOLVED'
+                new_state['conversation_status'] = 'Resolved'
             elif action == 'returns_handoff':
                 response, status = self.handle_returns_handoff(message)
                 new_state['state'] = status
-                new_state['conversation_status'] = 'IN_PROGRESS'
+                new_state['conversation_status'] = 'Pending'
             elif action == 'escalate' or intent == 'UNKNOWN':
                 response, status = self.handle_escalation(message, conversation_state.get('transcript', ''))
                 new_state['state'] = status
