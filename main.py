@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 import os
+import uuid
 from vera import get_vera
 from integrations.airtable import get_airtable
 
@@ -10,6 +11,25 @@ app = FastAPI(title="Vera Chatbot - Verdant Skin Co.")
 
 # Conversation state storage (in production, use Redis or database)
 conversation_states: Dict[str, Dict] = {}
+
+# Map internal intent codes to Airtable-friendly labels
+INTENT_LABELS = {
+    'GREETING': 'Greeting',
+    'Q1': 'Product Inquiry',
+    'Q2': 'Pricing',
+    'Q3': 'Product Recommendation',
+    'Q4': 'Ingredients',
+    'Q5': 'Order Status',
+    'Q6': 'Delivery Time',
+    'Q7': 'Returns & Refunds',
+    'Q8': 'Shipping Location',
+    'Q9': 'Shipping Time',
+    'Q10': 'Complaint / Escalation',
+    'UNKNOWN': 'General Inquiry',
+}
+
+def get_intent_label(intent: str) -> str:
+    return INTENT_LABELS.get(intent, 'General Inquiry')
 
 class ChatRequest(BaseModel):
     message: str
@@ -39,10 +59,10 @@ async def chat(request: ChatRequest):
     """Main chat endpoint for Shopify widget and direct API calls"""
     try:
         vera = get_vera()
-        airtable = get_airtable()
-        
+        airtable = get_airtable() if vera.airtable else None
+
         # Get or create conversation state
-        session_id = request.session_id or str(hash(request.message))
+        session_id = request.session_id or str(uuid.uuid4())
         state = conversation_states.get(session_id, {})
         
         # Process message
@@ -51,30 +71,25 @@ async def chat(request: ChatRequest):
         # Update conversation state
         conversation_states[session_id] = result['state']
         
-        # Write to Airtable - match exact field names from schema
-        airtable_data = {
-            "Channel": request.channel,
-            "Customer Message": request.message,
-            "Vera Response (AI Draft)": result['response'],
-            "Intent / Query Type": result['intent'],
-            "Conversation Status": result['state'].get('conversation_status', 'Pending'),
-            "Escalation Flag": result['state'].get('escalation_flag', False),
-            "Escalation Transcript": result['state'].get('transcript', '') if result['state'].get('escalation_flag') else ""
-        }
-        
-        # Link to Customer if customer_id provided
-        if request.customer_id:
-            airtable_data["Customer"] = [request.customer_id]
-        
-        # Link to Order if order_id provided
-        if request.order_id:
-            airtable_data["Order"] = [request.order_id]
-        
-        # Link to Lead if lead_id provided
-        if request.lead_id:
-            airtable_data["Lead"] = [request.lead_id]
-        
-        airtable.write_conversation("Vera Chatbot", airtable_data)
+        if airtable:
+            airtable_data = {
+                "Channel": request.channel,
+                "Customer Message": request.message,
+                "Vera Response (AI Draft)": result['response'],
+                "Conversation Status": result['state'].get('conversation_status', 'Pending'),
+                "Escalation Flag": result['state'].get('escalation_flag', False),
+                "Escalation Transcript": result['state'].get('transcript', '') if result['state'].get('escalation_flag') else ""
+            }
+            if request.customer_id:
+                airtable_data["Customer"] = [request.customer_id]
+            if request.order_id:
+                airtable_data["Order"] = [request.order_id]
+            if request.lead_id:
+                airtable_data["Lead"] = [request.lead_id]
+            try:
+                airtable.write_conversation("Vera Chatbot", airtable_data)
+            except Exception as ae:
+                print(f"Airtable write error (non-fatal): {ae}")
         
         return {
             "response": result['response'],
@@ -121,18 +136,21 @@ async def whatsapp_webhook(request: Request):
         # Update conversation state
         conversation_states[from_number] = result['state']
         
-        # Write to Airtable - match exact field names from schema
-        airtable_data = {
-            "Channel": "WhatsApp",
-            "Customer Message": message,
-            "Vera Response (AI Draft)": result['response'],
-            "Intent / Query Type": result['intent'],
-            "Conversation Status": result['state'].get('conversation_status', 'Pending'),
-            "Escalation Flag": result['state'].get('escalation_flag', False),
-            "Escalation Transcript": result['state'].get('transcript', '') if result['state'].get('escalation_flag') else ""
-        }
-        
-        airtable.write_conversation("Vera Chatbot", airtable_data)
+        # Write to Airtable
+        if vera.airtable:
+            airtable_data = {
+                "Channel": "WhatsApp",
+                "Customer Message": message,
+                "Vera Response (AI Draft)": result['response'],
+                "Intent / Query Type": get_intent_label(result['intent']),
+                "Conversation Status": result['state'].get('conversation_status', 'Pending'),
+                "Escalation Flag": result['state'].get('escalation_flag', False),
+                "Escalation Transcript": result['state'].get('transcript', '') if result['state'].get('escalation_flag') else ""
+            }
+            try:
+                vera.airtable.write_conversation("Vera Chatbot", airtable_data)
+            except Exception as ae:
+                print(f"Airtable write error (non-fatal): {ae}")
         
         # In production, you would send the response back via WhatsApp API
         # For now, return the response
@@ -178,18 +196,21 @@ async def instagram_webhook(request: Request):
         # Update conversation state
         conversation_states[from_user] = result['state']
         
-        # Write to Airtable - match exact field names from schema
-        airtable_data = {
-            "Channel": "Instagram DM",
-            "Customer Message": message,
-            "Vera Response (AI Draft)": result['response'],
-            "Intent / Query Type": result['intent'],
-            "Conversation Status": result['state'].get('conversation_status', 'Pending'),
-            "Escalation Flag": result['state'].get('escalation_flag', False),
-            "Escalation Transcript": result['state'].get('transcript', '') if result['state'].get('escalation_flag') else ""
-        }
-        
-        airtable.write_conversation("Vera Chatbot", airtable_data)
+        # Write to Airtable
+        if vera.airtable:
+            airtable_data = {
+                "Channel": "Instagram DM",
+                "Customer Message": message,
+                "Vera Response (AI Draft)": result['response'],
+                "Intent / Query Type": get_intent_label(result['intent']),
+                "Conversation Status": result['state'].get('conversation_status', 'Pending'),
+                "Escalation Flag": result['state'].get('escalation_flag', False),
+                "Escalation Transcript": result['state'].get('transcript', '') if result['state'].get('escalation_flag') else ""
+            }
+            try:
+                vera.airtable.write_conversation("Vera Chatbot", airtable_data)
+            except Exception as ae:
+                print(f"Airtable write error (non-fatal): {ae}")
         
         # In production, you would send the response back via Instagram API
         # For now, return the response
@@ -210,6 +231,15 @@ async def get_widget():
         return FileResponse(widget_path, media_type="application/javascript")
     else:
         raise HTTPException(status_code=404, detail="Widget not found")
+
+@app.get("/test")
+async def get_test_page():
+    """Serve the test chat page"""
+    test_path = os.path.join(os.path.dirname(__file__), "test.html")
+    if os.path.exists(test_path):
+        return FileResponse(test_path, media_type="text/html")
+    else:
+        raise HTTPException(status_code=404, detail="Test page not found")
 
 @app.get("/")
 async def root():

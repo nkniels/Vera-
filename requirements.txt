@@ -1,7 +1,6 @@
 fastapi
 uvicorn
-groq
-chromadb
+google-generativeai
 pyairtable
 python-dotenv
 requests

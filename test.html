@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Vera</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        #chat-container {
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            padding: 20px;
+            height: 400px;
+            overflow-y: auto;
+            background: #f9f9f9;
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .message {
+            margin: 0;
+            padding: 10px 15px;
+            border-radius: 15px;
+            max-width: 75%;
+            word-wrap: break-word;
+            width: fit-content;
+        }
+        .user-message {
+            background: #1B4332;
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 3px;
+        }
+        .bot-message {
+            background: #e0e0e0;
+            color: #333;
+            align-self: flex-start;
+            border-bottom-left-radius: 3px;
+        }
+        .typing-indicator {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+            height: 20px;
+            padding: 0 5px;
+        }
+        .dot {
+            width: 7px;
+            height: 7px;
+            background: #888;
+            border-radius: 50%;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+        .dot:nth-child(1) { animation-delay: -0.32s; }
+        .dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+        #input-container {
+            display: flex;
+            gap: 10px;
+        }
+        #message-input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        #send-button {
+            padding: 10px 20px;
+            background: #1B4332;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Vera</h1>
+    <div id="chat-container"></div>
+    <div id="input-container">
+        <input type="text" id="message-input" placeholder="Type your message...">
+        <button id="send-button">Send</button>
+    </div>
+
+    <script>
+        const chatContainer = document.getElementById('chat-container');
+        const messageInput = document.getElementById('message-input');
+        const sendButton = document.getElementById('send-button');
+        let sessionId = Date.now().toString();
+
+        function addMessage(text, isUser) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
+            messageDiv.textContent = text;
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function showTyping() {
+            const typingId = 'typing-' + Date.now();
+            const typingDiv = document.createElement('div');
+            typingDiv.className = 'message bot-message';
+            typingDiv.id = typingId;
+            typingDiv.innerHTML = '<div class="typing-indicator"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>';
+            chatContainer.appendChild(typingDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            return typingId;
+        }
+
+        function removeTyping(typingId) {
+            const typingDiv = document.getElementById(typingId);
+            if (typingDiv) {
+                typingDiv.remove();
+            }
+        }
+
+        async function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message) return;
+
+            addMessage(message, true);
+            messageInput.value = '';
+            
+            const typingId = showTyping();
+
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        message: message,
+                        session_id: sessionId
+                    })
+                });
+
+                const data = await response.json();
+                removeTyping(typingId);
+                addMessage(data.response, false);
+            } catch (error) {
+                removeTyping(typingId);
+                addMessage('Error: ' + error.message, false);
+            }
+        }
+
+        sendButton.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        // Initial greeting
+        addMessage('Hi! I\'m Vera from Verdant Skin Co. How can I help you today?', false);
+    </script>
+</body>
+</html>
