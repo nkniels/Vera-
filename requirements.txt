@@ -1,8 +1,7 @@
 fastapi
-uvicorn
+uvicorn[standard]
 google-generativeai
 pyairtable
 python-dotenv
 requests
-firebase-functions
-firebase-admin
+httpx
