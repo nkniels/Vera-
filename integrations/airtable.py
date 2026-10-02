@@ -33,7 +33,7 @@ class AirtableIntegration:
             records = table.all(formula=formula)
             
             if records:
-                return records[0]['fields']
+                return records[0]
             return None
         except Exception as e:
             print(f"Error querying Airtable: {e}")

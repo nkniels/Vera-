@@ -199,8 +199,15 @@ Use the provided knowledge base context to answer questions accurately. If you d
             return response, 'Resolved'
 
     def handle_query_order(self, message: str) -> tuple:
-        """Handle Q5 - Order status query."""
-        response = "Please provide your order number so I can check the status for you."
+        """Handle Q5 - Order status query dynamically."""
+        import re
+        # Look for VSC-1234 or TEST-ORD-123 pattern
+        match = re.search(r'(VSC-\d+|TEST-ORD-\d+)', message, re.IGNORECASE)
+        if match:
+            order_id = match.group(1).upper()
+            return self.handle_order_lookup(order_id)
+        
+        response = "Please provide your order number (e.g. VSC-1234) so I can check the status for you."
         return response, 'ORDER_COLLECTING'
 
     def handle_order_lookup(self, order_id: str) -> tuple:
@@ -211,12 +218,16 @@ Use the provided knowledge base context to answer questions accurately. If you d
         order_data = self.airtable.get_order_status('Orders', order_id)
 
         if order_data:
-            status = order_data.get('Order Status', 'Unknown')
+            status = order_data.get('fields', {}).get('Order Status', 'Unknown')
             response = f"Your order {order_id} status is: **{status}**. Is there anything else I can help you with?"
             return response, 'Resolved'
         else:
-            response = "I couldn't find that order number. Please double-check it, or contact our support team and we'll track it down for you!"
-            return response, 'Resolved'
+            escalation_msg = f"Order {order_id} not found. Escalating to human agent."
+            # Call handle_escalation which handles the email sending and returns the correct phrasing
+            response, status = self.handle_escalation(escalation_msg, f"Customer was checking status for order {order_id} but it was not found.")
+            # Prefix the response with the exact wording from the knowledge base
+            final_response = "I couldn't find that order number. I am escalating this to a human agent who will check the warehouse and reply within 2 hours.\n\n" + response
+            return final_response, 'Escalated'
 
     def handle_query_delivery(self, message: str) -> tuple:
         """Handle Q6 - Delivery time query."""
@@ -260,6 +271,32 @@ Use the provided knowledge base context to answer questions accurately. If you d
             response = "I'm having trouble reaching our support system right now. Please email us directly at verdantskinco.ng@gmail.com and we'll get back to you within 24 hours."
 
         return response, 'Escalated'
+
+    def classify_return_reason(self, message: str) -> str:
+        """Categorize return reason into exactly one of the Airtable Single Select options."""
+        valid_options = ["Wrong item received", "Changed my mind", "Damaged item"]
+        if not self.gemini_available:
+            return "Damaged item" # Default fallback
+            
+        prompt = f"Categorize the following customer return reason into EXACTLY ONE of these three options: {', '.join(valid_options)}. Reply with ONLY the exact text of the option, nothing else.\n\nCustomer reason: {message}"
+        
+        try:
+            response = self.gemini_client.models.generate_content(
+                model='gemini-3.5-flash',
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(
+                    temperature=0.1,
+                    max_output_tokens=50,
+                )
+            )
+            text = response.text.strip()
+            for valid_option in valid_options:
+                if valid_option.lower() in text.lower():
+                    return valid_option
+            return "Damaged item" # Default fallback if weird response
+        except Exception as e:
+            print(f"Error classifying reason: {e}")
+            return "Damaged item"
 
     def process_message(self, message: str, conversation_state: dict = None) -> dict:
         """Main message processing function."""
@@ -306,7 +343,7 @@ Use the provided knowledge base context to answer questions accurately. If you d
             new_state['state'] = 'RETURNS_COLLECTING_REASON'
 
         elif current_state == 'RETURNS_COLLECTING_REASON':
-            new_state['reason'] = message
+            new_state['reason'] = self.classify_return_reason(message)
             response = "Almost done! Please provide your email address so we can keep you updated."
             new_state['state'] = 'RETURNS_COLLECTING_EMAIL'
 

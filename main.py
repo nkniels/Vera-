@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 import os
@@ -8,6 +9,15 @@ from vera import get_vera
 from integrations.airtable import get_airtable
 
 app = FastAPI(title="Vera Chatbot - Verdant Skin Co.")
+
+# Enable CORS for the Firebase frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://vera-chatbot-2026.web.app", "http://localhost:5000", "http://127.0.0.1:5000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Conversation state storage (in production, use Redis or database)
 conversation_states: Dict[str, Dict] = {}
@@ -81,11 +91,26 @@ async def chat(request: ChatRequest):
                 "Escalation Transcript": result['state'].get('transcript', '') if result['state'].get('escalation_flag') else ""
             }
             if request.customer_id:
-                airtable_data["Customer"] = [request.customer_id]
+                try:
+                    customer_rec = airtable.get_customer_record("Customers", request.customer_id)
+                    if customer_rec:
+                        airtable_data["Customer"] = [customer_rec['id']]
+                except Exception as e:
+                    print(f"Failed to lookup customer: {e}")
             if request.order_id:
-                airtable_data["Order"] = [request.order_id]
+                try:
+                    order_rec = airtable.get_order_status("Orders", request.order_id)
+                    if order_rec:
+                        airtable_data["Order"] = [order_rec['id']]
+                except Exception as e:
+                    print(f"Failed to lookup order: {e}")
             if request.lead_id:
-                airtable_data["Lead"] = [request.lead_id]
+                try:
+                    lead_rec = airtable.get_lead_record("Leads", request.lead_id)
+                    if lead_rec:
+                        airtable_data["Lead"] = [lead_rec['id']]
+                except Exception as e:
+                    print(f"Failed to lookup lead: {e}")
             try:
                 airtable.write_conversation("Vera Chatbot", airtable_data)
             except Exception as ae:
