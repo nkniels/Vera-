@@ -120,7 +120,9 @@ Your scope is limited to:
 - Skin concerns and product recommendations
 - Brand values and ingredients
 
-If a customer asks anything outside this scope, respond helpfully to the best of your ability. Only use ESCALATE_VERA in your response if the customer is genuinely angry, distressed, or has an issue that truly cannot be resolved with information alone.
+If a customer asks anything outside this scope, do NOT answer the question. Instead, politely let them know that you're Vera, Verdant Skin Co.'s customer support assistant, and that you can only help with topics related to Verdant Skin Co. — such as products, orders, shipping, returns, skincare advice, and brand information. Gently guide them back to how you can assist.
+
+Only use ESCALATE_VERA in your response if the customer is genuinely angry, distressed, or has an issue that truly cannot be resolved with information alone.
 
 Use the provided knowledge base context to answer questions accurately. If you don't know the answer from the context, say so honestly and offer to escalate if needed."""
 
@@ -194,6 +196,15 @@ Use the provided knowledge base context to answer questions accurately. If you d
         context = "\n\n".join(context_results) if context_results else ""
         response = self.generate_response(message, context)
         return response, 'Resolved'
+
+    def handle_out_of_scope(self, message: str) -> str:
+        """Handle messages that fall outside Vera's scope."""
+        responses = [
+            "I appreciate your question! However, I'm Vera, Verdant Skin Co.'s customer support assistant, and I can only help with topics related to our brand — like products, orders, shipping, returns, and skincare advice. How can I assist you with any of those?",
+            "That's a great question, but it's outside what I'm able to help with! I'm Vera, here to support you with anything related to Verdant Skin Co. — whether it's product info, order tracking, returns, or skincare recommendations. What can I help you with?",
+            "I'm sorry, but that falls outside my area of expertise! I'm Vera from Verdant Skin Co., and I'm best equipped to help with our products, orders, shipping, returns, and skincare concerns. Is there anything along those lines I can assist you with?",
+        ]
+        return random.choice(responses)
 
     def handle_quiz_handoff(self, message: str) -> tuple:
         """Handle Q3 - Product matching: start quiz flow."""
@@ -467,9 +478,13 @@ Use the provided knowledge base context to answer questions accurately. If you d
                 new_state['state'] = status
                 new_state['conversation_status'] = status
 
-            else:
-                # query_knowledge (default for all other intents + UNKNOWN)
+            elif action == 'query_knowledge':
                 response, status = self.handle_query_knowledge(message)
+                new_state['conversation_status'] = 'Resolved'
+
+            else:
+                # UNKNOWN intent — out of scope
+                response = self.handle_out_of_scope(message)
                 new_state['conversation_status'] = 'Resolved'
 
         # Check for escalation keyword injected by LLM in its response
