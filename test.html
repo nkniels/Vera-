@@ -130,9 +130,8 @@
             
             const typingId = showTyping();
 
-            // When deployed to a free service like Render, replace this with your new URL
-            // e.g., const BACKEND_URL = 'https://vera-chatbot-xyz.onrender.com';
-            const BACKEND_URL = ''; // Leave empty for relative path (local) or add full URL
+            // Backend hosted on Vercel
+            const BACKEND_URL = 'https://vera-nux8.vercel.app';
 
             try {
                 const response = await fetch(`${BACKEND_URL}/chat`, {

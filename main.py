@@ -13,7 +13,14 @@ app = FastAPI(title="Vera Chatbot - Verdant Skin Co.")
 # Enable CORS for the Firebase frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://vera-chatbot-2026.web.app", "http://localhost:5000", "http://127.0.0.1:5000"],
+    allow_origins=[
+        "https://vera-chatbot-2026.web.app",
+        "https://vera-chatbot-2026.firebaseapp.com",
+        "https://vera-nux8.vercel.app",
+        "http://localhost:5000",
+        "http://127.0.0.1:5000",
+        "http://localhost:8000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
