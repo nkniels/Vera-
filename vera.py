@@ -171,7 +171,7 @@ Use the provided knowledge base context to answer questions accurately. If you d
                 contents=prompt,
                 config=genai_types.GenerateContentConfig(
                     temperature=0.7,
-                    max_output_tokens=500,
+                    max_output_tokens=1024,
                 )
             )
             return response.text
