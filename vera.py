@@ -171,7 +171,6 @@ Use the provided knowledge base context to answer questions accurately. If you d
                 contents=prompt,
                 config=genai_types.GenerateContentConfig(
                     temperature=0.7,
-                    max_output_tokens=1024,
                 )
             )
             return response.text
@@ -334,7 +333,6 @@ Use the provided knowledge base context to answer questions accurately. If you d
                 contents=prompt,
                 config=genai_types.GenerateContentConfig(
                     temperature=0.1,
-                    max_output_tokens=50,
                 )
             )
             text = response.text.strip()
