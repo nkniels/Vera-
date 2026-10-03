@@ -125,12 +125,32 @@ If a customer asks anything outside this scope, respond helpfully to the best of
 Use the provided knowledge base context to answer questions accurately. If you don't know the answer from the context, say so honestly and offer to escalate if needed."""
 
     def classify_intent(self, message: str) -> str:
-        """Classify customer message into one of the intents using keyword matching."""
+        """Classify customer message into one of the intents using keyword matching.
+        
+        Q10 (escalation) is checked first so angry/urgent messages are never
+        accidentally caught by a lower-priority intent like GREETING.
+        Short keywords (1-2 words) use whole-word matching to avoid false
+        positives from substrings (e.g. 'hi' inside 'this').
+        """
+        import re
         message_lower = message.lower()
-        for intent, config in self.intents.items():
+
+        # Priority order: Q10 first, then all others
+        priority_order = ['Q10', 'Q7', 'Q5', 'Q3', 'Q6', 'Q8', 'Q9', 'Q1', 'Q2', 'Q4', 'GREETING', 'UNKNOWN']
+
+        for intent in priority_order:
+            config = self.intents.get(intent)
+            if not config:
+                continue
             for keyword in config['keywords']:
-                if keyword in message_lower:
-                    return intent
+                # Use whole-word matching for short keywords to avoid substring hits
+                if len(keyword.split()) <= 2:
+                    pattern = r'\b' + re.escape(keyword) + r'\b'
+                    if re.search(pattern, message_lower):
+                        return intent
+                else:
+                    if keyword in message_lower:
+                        return intent
         return 'UNKNOWN'
 
     def generate_response(self, message: str, context: str = "") -> str:
@@ -198,13 +218,30 @@ Use the provided knowledge base context to answer questions accurately. If you d
             )
             return response, 'Resolved'
 
+    # Regex for valid order ID formats (VSC-1234 or TEST-ORD-123)
+    ORDER_ID_PATTERN = r'(VSC-\d+|TEST-ORD-\d+)'
+
+    def _extract_order_id(self, text: str):
+        """Return a normalised order ID from free text, or None."""
+        import re
+        match = re.search(self.ORDER_ID_PATTERN, text, re.IGNORECASE)
+        return match.group(1).upper() if match else None
+
+    def _is_cancellation(self, message: str) -> bool:
+        """Return True if the user wants to abandon the current flow."""
+        import re
+        cancel_keywords = ['cancel', 'never mind', 'nevermind', 'forget it',
+                           'stop', 'quit', 'exit', 'abort', 'no thanks', 'nvm']
+        msg = message.lower().strip()
+        for kw in cancel_keywords:
+            if re.search(r'\b' + re.escape(kw) + r'\b', msg):
+                return True
+        return False
+
     def handle_query_order(self, message: str) -> tuple:
         """Handle Q5 - Order status query dynamically."""
-        import re
-        # Look for VSC-1234 or TEST-ORD-123 pattern
-        match = re.search(r'(VSC-\d+|TEST-ORD-\d+)', message, re.IGNORECASE)
-        if match:
-            order_id = match.group(1).upper()
+        order_id = self._extract_order_id(message)
+        if order_id:
             return self.handle_order_lookup(order_id)
         
         response = "Please provide your order number (e.g. VSC-1234) so I can check the status for you."
@@ -212,6 +249,14 @@ Use the provided knowledge base context to answer questions accurately. If you d
 
     def handle_order_lookup(self, order_id: str) -> tuple:
         """Look up order in Airtable."""
+        import re
+        # Guard: reject strings that don't match our order ID format
+        if not re.fullmatch(r'VSC-\d+|TEST-ORD-\d+', order_id, re.IGNORECASE):
+            response = ("That doesn't look like a valid order number. "
+                        "Our order numbers follow the format VSC-1234. "
+                        "Could you double-check and try again?")
+            return response, 'ORDER_COLLECTING'
+
         if not self.airtable:
             return "I'm unable to look up orders right now. Please contact our support team at verdantskinco.ng@gmail.com.", 'Escalated'
 
@@ -222,12 +267,15 @@ Use the provided knowledge base context to answer questions accurately. If you d
             response = f"Your order {order_id} status is: **{status}**. Is there anything else I can help you with?"
             return response, 'Resolved'
         else:
-            escalation_msg = f"Order {order_id} not found. Escalating to human agent."
-            # Call handle_escalation which handles the email sending and returns the correct phrasing
-            response, status = self.handle_escalation(escalation_msg, f"Customer was checking status for order {order_id} but it was not found.")
-            # Prefix the response with the exact wording from the knowledge base
-            final_response = "I couldn't find that order number. I am escalating this to a human agent who will check the warehouse and reply within 2 hours.\n\n" + response
-            return final_response, 'Escalated'
+            # Order ID is syntactically valid but not in the CRM — escalate
+            transcript = f"Customer was checking status for order {order_id} but it was not found in Airtable."
+            _, _ = self.handle_escalation(f"Order {order_id} not found.", transcript)
+            response = (
+                f"I couldn't find order **{order_id}** in our system. "
+                "I've flagged this to our support team — someone will check the warehouse and reply within 2 hours. "
+                "Is there anything else I can help you with?"
+            )
+            return response, 'Escalated'
 
     def handle_query_delivery(self, message: str) -> tuple:
         """Handle Q6 - Delivery time query."""
@@ -303,6 +351,14 @@ Use the provided knowledge base context to answer questions accurately. If you d
         if conversation_state is None:
             conversation_state = {}
 
+        # Guard: ignore empty or whitespace-only messages
+        if not message or not message.strip():
+            return {
+                'response': "I didn't catch that — could you please type your message?",
+                'intent': 'UNKNOWN',
+                'state': conversation_state,
+            }
+
         intent = self.classify_intent(message)
         action = self.intents.get(intent, {}).get('action', 'query_knowledge')
 
@@ -312,6 +368,22 @@ Use the provided knowledge base context to answer questions accurately. If you d
 
         # Handle active multi-step conversation flows
         current_state = conversation_state.get('state')
+
+        # Universal escape hatch — lets the user bail out of any multi-step flow
+        COLLECTING_STATES = {
+            'QUIZ_COLLECTING', 'QUIZ_COLLECTING_TYPE',
+            'ORDER_COLLECTING',
+            'RETURNS_COLLECTING', 'RETURNS_COLLECTING_ORDER',
+            'RETURNS_COLLECTING_REASON', 'RETURNS_COLLECTING_EMAIL',
+        }
+        if current_state in COLLECTING_STATES and self._is_cancellation(message):
+            new_state.pop('state', None)
+            new_state['conversation_status'] = 'Resolved'
+            return {
+                'response': "No problem! Is there anything else I can help you with?",
+                'intent': intent,
+                'state': new_state,
+            }
 
         if current_state == 'QUIZ_COLLECTING':
             new_state['skin_concern'] = message
@@ -327,10 +399,19 @@ Use the provided knowledge base context to answer questions accurately. If you d
             new_state['conversation_status'] = status
 
         elif current_state == 'ORDER_COLLECTING':
-            response, status = self.handle_order_lookup(message)
-            new_state['state'] = status
-            new_state['conversation_status'] = status
-            new_state['order_id'] = message
+            order_id = self._extract_order_id(message)
+            if order_id:
+                response, status = self.handle_order_lookup(order_id)
+                new_state['state'] = status
+                new_state['conversation_status'] = status
+                new_state['order_id'] = order_id
+            else:
+                # User typed something that isn't an order ID — stay in collecting state
+                response = ("That doesn't look like a valid order number. "
+                            "Our order numbers follow the format VSC-1234 or TEST-ORD-001. "
+                            "Please double-check and try again, or type 'cancel' to go back.")
+                new_state['state'] = 'ORDER_COLLECTING'
+                new_state['conversation_status'] = 'Pending'
 
         elif current_state == 'RETURNS_COLLECTING':
             new_state['customer_name'] = message

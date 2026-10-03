@@ -29,7 +29,9 @@ class AirtableIntegration:
         """Query Orders table by Order ID"""
         try:
             table = self.base.table(table_name)
-            formula = f"{{Order ID}} = '{order_id}'"
+            # Sanitize: strip single-quotes to prevent Airtable formula injection
+            safe_order_id = order_id.replace("'", "")
+            formula = f"{{Order ID}} = '{safe_order_id}'"
             records = table.all(formula=formula)
             
             if records:
