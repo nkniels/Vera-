@@ -64,12 +64,20 @@
         #input-container {
             display: flex;
             gap: 10px;
+            align-items: flex-end;
         }
         #message-input {
             flex: 1;
             padding: 10px;
             border: 1px solid #ccc;
             border-radius: 5px;
+            resize: none;
+            overflow-y: auto;
+            min-height: 40px;
+            max-height: 120px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            line-height: 1.4;
         }
         #send-button {
             padding: 10px 20px;
@@ -85,7 +93,7 @@
     <h1>Vera</h1>
     <div id="chat-container"></div>
     <div id="input-container">
-        <input type="text" id="message-input" placeholder="Type your message...">
+        <textarea id="message-input" placeholder="Type your message..." rows="1"></textarea>
         <button id="send-button">Send</button>
     </div>
 
@@ -127,6 +135,7 @@
 
             addMessage(message, true);
             messageInput.value = '';
+            messageInput.style.height = 'auto';
             
             const typingId = showTyping();
 
@@ -155,8 +164,15 @@
         }
 
         sendButton.addEventListener('click', sendMessage);
-        messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') sendMessage();
+        messageInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+        messageInput.addEventListener('input', () => {
+            messageInput.style.height = 'auto';
+            messageInput.style.height = messageInput.scrollHeight + 'px';
         });
 
         // Initial greeting
