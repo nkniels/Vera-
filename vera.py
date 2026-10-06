@@ -288,13 +288,17 @@ Use the provided knowledge base context to answer questions accurately. If you d
         response = "I can help you with your return! Please provide the following:\n1. Your name\n2. Order number\n3. Reason for return"
         return response, 'RETURNS_COLLECTING'
 
-    def handle_returns_submission(self, customer_name: str, order_number: str, reason: str, email: str) -> tuple:
+    def handle_returns_submission(self, customer_name: str, order_number: str, reason: str, email: str,
+                                  item_unused: bool = True, packaging_available: bool = True) -> tuple:
         """Submit return request."""
         if not self.returns:
             response = "I've noted your return request. Please email verdantskinco.ng@gmail.com with your order number and reason, and our team will process it within 2 business days."
             return response, 'Resolved'
 
-        success = self.returns.submit_return_request(customer_name, order_number, reason, email)
+        success = self.returns.submit_return_request(
+            customer_name, order_number, reason, email,
+            item_unused=item_unused, packaging_available=packaging_available
+        )
 
         if success:
             response = "Your return request has been submitted successfully! Our team will process it within 2 business days and reach out to you via email."
@@ -344,6 +348,76 @@ Use the provided knowledge base context to answer questions accurately. If you d
             print(f"Error classifying reason: {e}")
             return "Damaged item"
 
+    def classify_item_condition(self, message: str) -> tuple:
+        """
+        Classify whether the customer's return item is unused and if original packaging is available.
+        Returns (item_unused: bool, packaging_available: bool).
+        """
+        if not self.gemini_available:
+            return self._fallback_item_condition(message)
+
+        prompt = (
+            "A customer was asked two questions about an item they want to return:\n"
+            "1. Is the item unused?\n"
+            "2. Do you still have the original packaging?\n\n"
+            f"Customer response: \"{message}\"\n\n"
+            "Determine the boolean answer for each question.\n"
+            "Respond ONLY with a JSON object in this exact format, with no extra text or markdown:\n"
+            '{"item_unused": true, "packaging_available": true}'
+        )
+
+        try:
+            response = self.gemini_client.models.generate_content(
+                model='gemini-3.5-flash',
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(
+                    temperature=0.1,
+                )
+            )
+            text = response.text.strip()
+            if text.startswith("```"):
+                text = text.strip("`")
+                if text.startswith("json"):
+                    text = text[4:].strip()
+            import json
+            data = json.loads(text)
+            item_unused = bool(data.get("item_unused", True))
+            packaging_available = bool(data.get("packaging_available", True))
+            return item_unused, packaging_available
+        except Exception as e:
+            print(f"Error classifying item condition with AI: {e}")
+            return self._fallback_item_condition(message)
+
+    def _fallback_item_condition(self, message: str) -> tuple:
+        """Rule-based parsing fallback for item condition."""
+        msg = message.lower().strip()
+
+        if any(neg in msg for neg in ["neither", "no to both", "both no", "none", "not unused and no", "no and no"]):
+            return False, False
+
+        if any(aff in msg for aff in ["yes to both", "both yes", "both", "yes", "yeah", "yep", "sure", "correct"]) and "no" not in msg and "not" not in msg:
+            return True, True
+
+        item_unused = True
+        packaging_available = True
+
+        if "used" in msg and "unused" not in msg:
+            item_unused = False
+        if "opened" in msg and "unopened" not in msg:
+            item_unused = False
+        if "1. no" in msg or "1: no" in msg or "no to 1" in msg or "no to the first" in msg:
+            item_unused = False
+
+        if "no packaging" in msg or "lost the packaging" in msg or "threw" in msg or "discarded" in msg or "no box" in msg:
+            packaging_available = False
+        if "2. no" in msg or "2: no" in msg or "no to 2" in msg or "no to the second" in msg:
+            packaging_available = False
+
+        if msg == "no":
+            return False, False
+
+        return item_unused, packaging_available
+
     def process_message(self, message: str, conversation_state: dict = None) -> dict:
         """Main message processing function."""
         if conversation_state is None:
@@ -373,6 +447,7 @@ Use the provided knowledge base context to answer questions accurately. If you d
             'ORDER_COLLECTING',
             'RETURNS_COLLECTING', 'RETURNS_COLLECTING_ORDER',
             'RETURNS_COLLECTING_REASON', 'RETURNS_COLLECTING_EMAIL',
+            'RETURNS_COLLECTING_CONDITION',
         }
         if current_state in COLLECTING_STATES and self._is_cancellation(message):
             new_state.pop('state', None)
@@ -425,11 +500,24 @@ Use the provided knowledge base context to answer questions accurately. If you d
 
         elif current_state == 'RETURNS_COLLECTING_EMAIL':
             new_state['email'] = message
+            response = (
+                "Almost done! Just two quick questions to confirm your return:\n"
+                "1. Is the item unused?\n"
+                "2. Do you still have the original packaging?"
+            )
+            new_state['state'] = 'RETURNS_COLLECTING_CONDITION'
+
+        elif current_state == 'RETURNS_COLLECTING_CONDITION':
+            item_unused, packaging_available = self.classify_item_condition(message)
+            new_state['item_unused'] = item_unused
+            new_state['packaging_available'] = packaging_available
             response, status = self.handle_returns_submission(
                 conversation_state.get('customer_name', ''),
                 conversation_state.get('order_number', ''),
                 conversation_state.get('reason', ''),
-                message
+                conversation_state.get('email', ''),
+                item_unused=item_unused,
+                packaging_available=packaging_available
             )
             new_state['state'] = status
             new_state['conversation_status'] = status

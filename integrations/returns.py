@@ -46,7 +46,9 @@ class ReturnsService:
         self.airtable = get_airtable()
 
     def _submit_google_form(self, customer_name: str, order_number: str,
-                             reason: str, email: str) -> bool:
+                             reason: str, email: str,
+                             item_unused: bool = True,
+                             packaging_available: bool = True) -> bool:
         """
         Silently POST to Intern 4's Google Form.
         This triggers her existing Make.com workflow automatically.
@@ -66,16 +68,21 @@ class ReturnsService:
             (FORM_FIELDS["name"],         customer_name),
             (FORM_FIELDS["email"],        email),
             (FORM_FIELDS["order_number"], order_number),
+            (FORM_FIELDS["phone"],        "N/A"),   # Required by Google Form
             # Date of purchase — Google Forms requires year/month/day as separate params
             (FORM_FIELDS["date_year"],    str(now.year)),
             (FORM_FIELDS["date_month"],   str(now.month)),
             (FORM_FIELDS["date_day"],     str(now.day)),
             (FORM_FIELDS["action"],       action),
             (FORM_FIELDS["reason"],       form_reason),
-            # Other checkboxes — send both options (item is unused + packaging available)
-            (FORM_FIELDS["other"],        "Is the item unused?"),
-            (FORM_FIELDS["other"],        "Is the original packaging available?"),
         ]
+
+        # Other checkboxes — accurately reflect customer response
+        # Google Form marks this question required (must select at least one)
+        if item_unused:
+            payload.append((FORM_FIELDS["other"], "Is the item unused?"))
+        if packaging_available or (not item_unused and not packaging_available):
+            payload.append((FORM_FIELDS["other"], "Is the original packaging available?"))
 
         try:
             # Google Forms expects a form-encoded POST, not JSON
@@ -87,32 +94,43 @@ class ReturnsService:
                 headers={"Referer": GOOGLE_FORM_URL.replace("formResponse", "viewform")}
             )
             # Google Forms returns 200 on success (even after redirect)
-            print(f"Google Form submitted for order {order_number} — status: {response.status_code}")
-            return True
+            print(f"Google Form submitted for order {order_number} (unused={item_unused}, pkg={packaging_available}) — status: {response.status_code}")
+            return response.status_code == 200
         except requests.exceptions.RequestException as e:
             print(f"Error submitting Google Form: {e}")
             return False
 
     def submit_return_request(self, customer_name: str, order_number: str,
-                               reason: str, email: str) -> bool:
+                               reason: str, email: str,
+                               item_unused: bool = True,
+                               packaging_available: bool = True) -> bool:
         """
         Full returns pipeline:
         1. Submit Intern 4's Google Form → triggers her Make.com workflow
         2. Write a backup record to Airtable Returns & Refunds table
         Returns True if at least one path succeeded.
         """
-        form_ok = self._submit_google_form(customer_name, order_number, reason, email)
+        form_ok = self._submit_google_form(
+            customer_name, order_number, reason, email,
+            item_unused=item_unused,
+            packaging_available=packaging_available
+        )
 
         # Airtable write — always attempted as backup / audit trail
         airtable_ok = False
         try:
+            form_reason = REASON_MAP.get(reason, "Damaged item")
+            action = "Return product"
+            if form_reason in ("Wrong item received", "Damaged item"):
+                action = "Request a refund"
+
             airtable_data = {
                 "Customer Name":   customer_name,
                 "Email":           email,
                 "Order Number":    order_number,
-                "Reason":          reason,
+                "Request Type":    action,
+                "Reason":          form_reason,
                 "Submission Date": datetime.now().strftime('%Y-%m-%d'),
-                "Status":          "Pending",   # Make.com will update this
             }
             self.airtable.write_conversation("Returns & Refunds", airtable_data)
             print(f"Return request written to Airtable: {order_number}")
