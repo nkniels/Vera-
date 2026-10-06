@@ -69,6 +69,21 @@ class AirtableIntegration:
             print(f"Error querying lead: {e}")
             return None
 
+    def get_lead_by_email(self, table_name: str, email: str):
+        """Get the latest lead record by customer Email"""
+        try:
+            table = self.base.table(table_name)
+            safe_email = email.strip().lower().replace("'", "")
+            formula = f"LOWER({{Email}}) = '{safe_email}'"
+            records = table.all(formula=formula)
+            if records:
+                # Return the latest record
+                return records[-1]
+            return None
+        except Exception as e:
+            print(f"Error querying lead by email: {e}")
+            return None
+
 # Singleton instance
 _airtable_instance = None
 

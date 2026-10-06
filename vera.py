@@ -72,7 +72,7 @@ class VeraChatbot:
                 'action': 'query_knowledge'
             },
             'Q3': {
-                'keywords': ['what should i use', 'skin type', 'recommend', 'suggest', 'best for my skin', 'what is good for'],
+                'keywords': ['what should i use', 'skin type', 'recommend', 'suggest', 'best for my skin', 'what is good for', 'skin quiz', 'skincare quiz', 'take the quiz', 'quiz', 'quiz results'],
                 'action': 'quiz_handoff'
             },
             'Q4': {
@@ -206,27 +206,86 @@ Use the provided knowledge base context to answer questions accurately. If you d
         ]
         return random.choice(responses)
 
+    def _extract_email(self, text: str):
+        """Extract email address from text if present, including plus-addressing."""
+        import re
+        match = re.search(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', text)
+        return match.group(0) if match else None
+
     def handle_quiz_handoff(self, message: str) -> tuple:
-        """Handle Q3 - Product matching: start quiz flow."""
-        response = "I'd love to help you find the perfect products for your skin! Let me ask you a couple of quick questions.\n\nWhat is your main skin concern? (e.g. acne, dryness, dark spots, oily skin)"
-        return response, 'QUIZ_COLLECTING'
+        """Handle Q3 - Product matching: start Tally quiz flow or look up existing results."""
+        email = self._extract_email(message)
+        msg_lower = message.lower()
 
-    def handle_quiz_submission(self, skin_concern: str, skin_type: str) -> tuple:
-        """Submit quiz to endpoint or fall back to AI recommendation."""
-        result = self.quiz.submit_quiz_answers(skin_concern, skin_type)
+        # If user explicitly asks for existing quiz results and provided an email
+        if email and any(w in msg_lower for w in ['result', 'done', 'finish', 'completed', 'already took', 'check']):
+            return self.handle_quiz_results_lookup(email)
 
-        if result and 'recommendation' in result:
-            response = f"Based on your answers, I recommend: {result['recommendation']}"
+        if email:
+            quiz_url = self.quiz.get_quiz_url(email)
+            response = (
+                f"I'd love to help you find the perfect routine for your skin! ✨\n\n"
+                f"We have a personalized Skin Quiz that analyzes your skin needs and builds a custom routine with a prefilled cart just for you:\n"
+                f"👉 {quiz_url}\n\n"
+                f"Take a quick minute to complete it. Once you're done, simply reply **'done'** here and I'll pull up your recommendations and cart link!"
+            )
+            return response, 'QUIZ_WAITING_COMPLETION'
+
+        response = (
+            "I'd love to help you find the perfect skincare routine for your skin! ✨ "
+            "We have a quick 1-minute Skin Quiz that creates a personalized routine and prefilled Shopify cart just for you.\n\n"
+            "Could you please share your email address so I can get your quiz link ready?"
+        )
+        return response, 'QUIZ_COLLECTING_EMAIL'
+
+    def handle_quiz_results_lookup(self, email: str) -> tuple:
+        """Look up quiz recommendations in Airtable Leads table by email."""
+        result = self.quiz.get_lead_recommendations(email)
+        if result:
+            lead_name = result.get('lead_name', '').strip()
+            name_greeting = f" {lead_name}" if lead_name and not lead_name.startswith('TEST') else ""
+            products_text = result.get('recommended_products', '').strip()
+            cart_link = result.get('cart_link', '').strip()
+            rationale = result.get('rationale', '').strip()
+
+            response = f"I found your quiz results{name_greeting}! 🎉\n\n"
+            if rationale:
+                response += f"{rationale}\n\n"
+            if products_text:
+                response += "**Your Recommended Products:**\n"
+                for line in products_text.split('\n'):
+                    line = line.strip()
+                    if line:
+                        response += f"• {line}\n"
+                response += "\n"
+            if cart_link:
+                response += (
+                    f"🛒 **Your Prefilled Cart:**\n"
+                    f"Your custom Shopify cart is ready to go:\n"
+                    f"👉 {cart_link}\n\n"
+                )
+            response += "Is there anything else I can help you with today?"
             return response, 'Resolved'
         else:
-            # Quiz endpoint not configured — use AI to generate recommendation inline
-            context_results = self.kb.query(f"products for {skin_type} skin {skin_concern}", n_results=3)
-            context = "\n\n".join(context_results) if context_results else ""
-            response = self.generate_response(
-                f"Recommend Verdant Skin Co. products for a customer with {skin_type} skin whose main concern is {skin_concern}. Be specific and warm.",
-                context
+            quiz_url = self.quiz.get_quiz_url(email)
+            response = (
+                f"I couldn't find a completed quiz submission for **{email}** in our system just yet! "
+                f"It can take a few seconds to sync after submitting.\n\n"
+                f"If you haven't taken it yet, here is your link:\n👉 {quiz_url}\n\n"
+                f"Once you've clicked **Submit**, reply **'done'** here and I'll pull up your routine. "
+                f"(Or reply with a different email if you used another one!)"
             )
-            return response, 'Resolved'
+            return response, 'QUIZ_WAITING_COMPLETION'
+
+    def handle_quiz_submission(self, skin_concern: str, skin_type: str) -> tuple:
+        """Fallback inline AI recommendation."""
+        context_results = self.kb.query(f"products for {skin_type} skin {skin_concern}", n_results=3)
+        context = "\n\n".join(context_results) if context_results else ""
+        response = self.generate_response(
+            f"Recommend Verdant Skin Co. products for a customer with {skin_type} skin whose main concern is {skin_concern}. Be specific and warm.",
+            context
+        )
+        return response, 'Resolved'
 
     def _extract_order_id(self, text: str):
         """Return the trimmed order ID from user input, or None if empty."""
@@ -443,7 +502,7 @@ Use the provided knowledge base context to answer questions accurately. If you d
 
         # Universal escape hatch — lets the user bail out of any multi-step flow
         COLLECTING_STATES = {
-            'QUIZ_COLLECTING', 'QUIZ_COLLECTING_TYPE',
+            'QUIZ_COLLECTING_EMAIL', 'QUIZ_WAITING_COMPLETION',
             'ORDER_COLLECTING',
             'RETURNS_COLLECTING', 'RETURNS_COLLECTING_ORDER',
             'RETURNS_COLLECTING_REASON', 'RETURNS_COLLECTING_EMAIL',
@@ -458,18 +517,41 @@ Use the provided knowledge base context to answer questions accurately. If you d
                 'state': new_state,
             }
 
-        if current_state == 'QUIZ_COLLECTING':
-            new_state['skin_concern'] = message
-            response = "Thanks! And how would you describe your skin — dry, oily, combination, or sensitive?"
-            new_state['state'] = 'QUIZ_COLLECTING_TYPE'
+        if current_state == 'QUIZ_COLLECTING_EMAIL':
+            extracted_email = self._extract_email(message) or (message.strip() if '@' in message else None)
+            if extracted_email:
+                new_state['quiz_email'] = extracted_email
+                new_state['email'] = extracted_email
+                quiz_url = self.quiz.get_quiz_url(extracted_email)
+                response = (
+                    f"Thank you! Here is your personalized skin quiz link:\n"
+                    f"👉 {quiz_url}\n\n"
+                    f"It takes just a minute to complete. Once you submit the quiz, reply **'done'** here and I'll retrieve your custom routine and prefilled cart right away!"
+                )
+                new_state['state'] = 'QUIZ_WAITING_COMPLETION'
+                new_state['conversation_status'] = 'Pending'
+            else:
+                response = "Please provide a valid email address so I can generate your personalized quiz link and look up your results."
+                new_state['state'] = 'QUIZ_COLLECTING_EMAIL'
+                new_state['conversation_status'] = 'Pending'
 
-        elif current_state == 'QUIZ_COLLECTING_TYPE':
-            new_state['skin_type'] = message
-            response, status = self.handle_quiz_submission(
-                conversation_state.get('skin_concern', ''), message
-            )
-            new_state['state'] = status
-            new_state['conversation_status'] = status
+        elif current_state == 'QUIZ_WAITING_COMPLETION':
+            extracted_email = self._extract_email(message)
+            if extracted_email:
+                new_state['quiz_email'] = extracted_email
+                new_state['email'] = extracted_email
+                email = extracted_email
+            else:
+                email = conversation_state.get('quiz_email') or conversation_state.get('email', '')
+
+            if email:
+                response, status = self.handle_quiz_results_lookup(email)
+                new_state['state'] = status
+                new_state['conversation_status'] = status
+            else:
+                response = "Could you please tell me the email address you used for the quiz so I can look up your results?"
+                new_state['state'] = 'QUIZ_COLLECTING_EMAIL'
+                new_state['conversation_status'] = 'Pending'
 
         elif current_state == 'ORDER_COLLECTING':
             order_id = message.strip()
