@@ -23,8 +23,14 @@ FORM_FIELDS = {
     "email":         "entry.1045781291",
     "order_number":  "entry.1065046570",
     "phone":         "entry.1166974658",
+    # Date of purchase — Google Forms date fields split into 3 sub-keys
+    "date_year":     "entry.839337160_year",
+    "date_month":    "entry.839337160_month",
+    "date_day":      "entry.839337160_day",
     "action":        "entry.319484113",   # "Request a refund" | "Return product"
     "reason":        "entry.505576032",   # "Wrong item received" | "Changed my mind" | "Damaged item"
+    # Other checkboxes — both options share the same entry ID (sent twice for multi-select)
+    "other":         "entry.158684246",   # "Is the item unused?" | "Is the original packaging available?"
 }
 
 # Map Vera's internal reason labels → Google Form option text
@@ -52,13 +58,24 @@ class ReturnsService:
 
         form_reason = REASON_MAP.get(reason, "Damaged item")
 
-        payload = {
-            FORM_FIELDS["name"]:         customer_name,
-            FORM_FIELDS["email"]:        email,
-            FORM_FIELDS["order_number"]: order_number,
-            FORM_FIELDS["action"]:       action,
-            FORM_FIELDS["reason"]:       form_reason,
-        }
+        # Use today's date for Date of purchase
+        now = datetime.now()
+
+        # Build payload as a list of tuples so repeated keys (checkboxes) work correctly
+        payload = [
+            (FORM_FIELDS["name"],         customer_name),
+            (FORM_FIELDS["email"],        email),
+            (FORM_FIELDS["order_number"], order_number),
+            # Date of purchase — Google Forms requires year/month/day as separate params
+            (FORM_FIELDS["date_year"],    str(now.year)),
+            (FORM_FIELDS["date_month"],   str(now.month)),
+            (FORM_FIELDS["date_day"],     str(now.day)),
+            (FORM_FIELDS["action"],       action),
+            (FORM_FIELDS["reason"],       form_reason),
+            # Other checkboxes — send both options (item is unused + packaging available)
+            (FORM_FIELDS["other"],        "Is the item unused?"),
+            (FORM_FIELDS["other"],        "Is the original packaging available?"),
+        ]
 
         try:
             # Google Forms expects a form-encoded POST, not JSON
