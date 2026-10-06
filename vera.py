@@ -228,14 +228,10 @@ Use the provided knowledge base context to answer questions accurately. If you d
             )
             return response, 'Resolved'
 
-    # Regex for valid order ID formats (VSC-1234 or TEST-ORD-123)
-    ORDER_ID_PATTERN = r'(VSC-\d+|TEST-ORD-\d+)'
-
     def _extract_order_id(self, text: str):
-        """Return a normalised order ID from free text, or None."""
-        import re
-        match = re.search(self.ORDER_ID_PATTERN, text, re.IGNORECASE)
-        return match.group(1).upper() if match else None
+        """Return the trimmed order ID from user input, or None if empty."""
+        order_id = text.strip()
+        return order_id if order_id else None
 
     def _is_cancellation(self, message: str) -> bool:
         """Return True if the user wants to abandon the current flow."""
@@ -254,18 +250,11 @@ Use the provided knowledge base context to answer questions accurately. If you d
         if order_id:
             return self.handle_order_lookup(order_id)
         
-        response = "Please provide your order number (e.g. VSC-1234) so I can check the status for you."
+        response = "Please provide your order number so I can check the status for you."
         return response, 'ORDER_COLLECTING'
 
     def handle_order_lookup(self, order_id: str) -> tuple:
         """Look up order in Airtable."""
-        import re
-        # Guard: reject strings that don't match our order ID format
-        if not re.fullmatch(r'VSC-\d+|TEST-ORD-\d+', order_id, re.IGNORECASE):
-            response = ("That doesn't look like a valid order number. "
-                        "Our order numbers follow the format VSC-1234. "
-                        "Could you double-check and try again?")
-            return response, 'ORDER_COLLECTING'
 
         if not self.airtable:
             return "I'm unable to look up orders right now. Please contact our support team at verdantskinco.ng@gmail.com.", 'Escalated'
@@ -408,17 +397,14 @@ Use the provided knowledge base context to answer questions accurately. If you d
             new_state['conversation_status'] = status
 
         elif current_state == 'ORDER_COLLECTING':
-            order_id = self._extract_order_id(message)
+            order_id = message.strip()
             if order_id:
                 response, status = self.handle_order_lookup(order_id)
                 new_state['state'] = status
                 new_state['conversation_status'] = status
                 new_state['order_id'] = order_id
             else:
-                # User typed something that isn't an order ID — stay in collecting state
-                response = ("That doesn't look like a valid order number. "
-                            "Our order numbers follow the format VSC-1234 or TEST-ORD-001. "
-                            "Please double-check and try again, or type 'cancel' to go back.")
+                response = "Please provide your order number so I can look it up for you."
                 new_state['state'] = 'ORDER_COLLECTING'
                 new_state['conversation_status'] = 'Pending'
 
