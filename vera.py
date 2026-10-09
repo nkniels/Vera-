@@ -65,7 +65,7 @@ class VeraChatbot:
             },
             'Q1': {
                 'keywords': ['what products', 'what do you sell', 'show me', 'product list', 'catalogue', 'what do you have'],
-                'action': 'query_knowledge'
+                'action': 'product_catalogue'
             },
             'Q2': {
                 'keywords': ['how much', 'price', 'cost', 'afford', 'expensive', 'cheap'],
@@ -102,7 +102,17 @@ class VeraChatbot:
             'Q10': {
                 'keywords': ['angry', 'frustrated', 'terrible', 'damaged my skin', 'unacceptable', 'hate', 'worst'],
                 'action': 'escalate'
-            }
+            },
+            'HEALTH_SAFETY': {
+                'keywords': [
+                    'pregnant', 'pregnancy', 'breastfeeding', 'nursing',
+                    'medical condition', 'allergic', 'allergy', 'safe to use',
+                    'safe for', 'safe during', 'skin reaction', 'rash', 'irritation',
+                    'safe for pregnancy', 'safe while', 'doctor', 'pharmacist',
+                    'is it safe', 'can i use', 'suitable for pregnant'
+                ],
+                'action': 'health_safety'
+            },
         }
 
         self.system_prompt = """You are Vera, a warm, empathetic, and professional customer support chatbot for Verdant Skin Co., a clean beauty brand based in Accra, Ghana.
@@ -137,8 +147,9 @@ Use the provided knowledge base context to answer questions accurately. If you d
         import re
         message_lower = message.lower()
 
-        # Priority order: Q10 first, then all others
-        priority_order = ['Q10', 'Q7', 'Q5', 'Q3', 'Q6', 'Q8', 'Q9', 'Q1', 'Q2', 'Q4', 'GREETING', 'UNKNOWN']
+        # Priority order: Q10 first, HEALTH_SAFETY second (overrides order/returns flows),
+        # then all others
+        priority_order = ['Q10', 'HEALTH_SAFETY', 'Q7', 'Q5', 'Q3', 'Q6', 'Q8', 'Q9', 'Q1', 'Q2', 'Q4', 'GREETING', 'UNKNOWN']
 
         for intent in priority_order:
             config = self.intents.get(intent)
@@ -196,6 +207,79 @@ Use the provided knowledge base context to answer questions accurately. If you d
         context = "\n\n".join(context_results) if context_results else ""
         response = self.generate_response(message, context)
         return response, 'Resolved'
+
+    def handle_health_safety(self, message: str) -> tuple:
+        """Handle health, safety, and pregnancy-related product questions.
+
+        Does NOT make a safety determination.  Provides ingredient information
+        from the knowledge base where relevant and directs the customer to a
+        qualified healthcare professional.
+        """
+        msg_lower = message.lower()
+
+        ingredient_note = ""
+        if 'moringa' in msg_lower or 'glow serum' in msg_lower or 'serum' in msg_lower:
+            ingredient_note = (
+                "The Moringa Glow Serum contains Moringa Extract, "
+                "which is antioxidant-rich and anti-inflammatory. "
+            )
+        elif 'shea' in msg_lower or 'balm' in msg_lower or 'repair' in msg_lower:
+            ingredient_note = (
+                "The Shea Gentle Repair Balm contains raw unrefined Shea Butter, "
+                "used for deep moisturisation and barrier repair. "
+            )
+        elif 'cleanser' in msg_lower or 'black soap' in msg_lower:
+            ingredient_note = (
+                "The Black Soap Clarifying Cleanser contains traditional Ghanaian Black Soap. "
+            )
+        elif 'baobab' in msg_lower or 'moisture cream' in msg_lower or 'cream' in msg_lower:
+            ingredient_note = (
+                "The Baobab Deep Moisture Cream contains Baobab Oil, "
+                "rich in vitamins A, D, E, and F. "
+            )
+
+        response = "Thank you for asking — your safety is what matters most. "
+        if ingredient_note:
+            response += ingredient_note
+        response += (
+            "All our products are 100% natural, plant-based, and free of parabens, sulphates, "
+            "and artificial fragrances. However, I'm not able to make a safety determination for "
+            "your specific situation. Please consult your healthcare professional, doctor, or "
+            "pharmacist before use during pregnancy, breastfeeding, or if you have any medical "
+            "conditions or skin sensitivities. Is there anything else I can help you with?"
+        )
+        return response, 'Resolved'
+
+    def handle_product_catalogue(self, message: str) -> tuple:
+        """Return a concise one-line-per-product catalogue."""
+        response = (
+            "Here's what we carry at Verdant Skin Co.:\n\n"
+            "Black Soap Clarifying Cleanser — $15 — Best for oily or acne-prone skin\n"
+            "Baobab Deep Moisture Cream — $25 — Best for dry or mature skin\n"
+            "Moringa Glow Serum — $28 — Best for combination skin and dullness\n"
+            "Shea Gentle Repair Balm — $20 — Best for sensitive or eczema-prone skin\n"
+            "Full Routine Bundle (all 4) — $75 — Save 15%\n\n"
+            "Want a personalised recommendation, more details on a product, or ingredient information? Just ask!"
+        )
+        return response, 'Resolved'
+
+    def strip_markdown(self, text: str) -> str:
+        """Convert common Markdown markers to plain text for the widget's textContent renderer."""
+        import re
+        if not text:
+            return text
+        # Remove bold/italic markers (**text**, *text*, __text__, _text_)
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text, flags=re.DOTALL)
+        text = re.sub(r'__(.+?)__', r'\1', text, flags=re.DOTALL)
+        text = re.sub(r'\*(.+?)\*', r'\1', text, flags=re.DOTALL)
+        text = re.sub(r'_(.+?)_', r'\1', text, flags=re.DOTALL)
+        # Remove heading markers (# at start of line)
+        text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+        # Remove horizontal rules
+        text = re.sub(r'^[-*_]{3,}\s*$', '', text, flags=re.MULTILINE)
+        # Collapse 3+ consecutive blank lines to 2
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        return text.strip()
 
     def handle_out_of_scope(self, message: str) -> str:
         """Handle messages that fall outside Vera's scope."""
@@ -288,9 +372,48 @@ Use the provided knowledge base context to answer questions accurately. If you d
         return response, 'Resolved'
 
     def _extract_order_id(self, text: str):
-        """Return the trimmed order ID from user input, or None if empty."""
-        order_id = text.strip()
-        return order_id if order_id else None
+        """Extract a valid order ID from text, or None if no order ID is present."""
+        import re
+        text = text.strip()
+        if not text:
+            return None
+
+        # 1. Match common prefixed dash order patterns, e.g. TEST-ORD-001, VSC-1234, FINAL-ORD-02
+        pattern_dash = r'\b([A-Za-z]{2,}(?:-[A-Za-z0-9]+)+)\b'
+        match = re.search(pattern_dash, text)
+        if match:
+            return match.group(1).upper()
+
+        # 2. Match hashtag orders, e.g. #1002, #1003
+        pattern_hash = r'(#\d+)'
+        match = re.search(pattern_hash, text)
+        if match:
+            return match.group(1)
+
+        # 3. Standalone or embedded alphanumeric token containing digits (e.g. 18926617756013, VSC1001)
+        for token in text.split():
+            clean_tok = token.strip('?.!,;:()[]{}"\'')
+            if re.match(r'^[A-Za-z0-9#-]{3,}$', clean_tok) and any(c.isdigit() for c in clean_tok):
+                return clean_tok.upper() if not clean_tok.startswith('#') else clean_tok
+
+        return None
+
+    def _is_privacy_preference(self, message: str) -> bool:
+        """Return True if the user signals they don't want to share personal data."""
+        import re
+        msg = message.lower().strip()
+        privacy_keywords = [
+            "don't want to share", "dont want to share",
+            "don't want to give", "dont want to give",
+            "without sharing", "prefer not to share",
+            "general question", "general policy",
+            "just want to know", "just asking",
+            "not comfortable sharing", "rather not share",
+        ]
+        for kw in privacy_keywords:
+            if kw in msg:
+                return True
+        return False
 
     def _is_cancellation(self, message: str) -> bool:
         """Return True if the user wants to abandon the current flow."""
@@ -308,8 +431,11 @@ Use the provided knowledge base context to answer questions accurately. If you d
         order_id = self._extract_order_id(message)
         if order_id:
             return self.handle_order_lookup(order_id)
-        
-        response = "Please provide your order number so I can check the status for you."
+
+        response = (
+            "I'd be happy to check on your order! Could you please share your order number? "
+            "You'll find it in your confirmation email."
+        )
         return response, 'ORDER_COLLECTING'
 
     def handle_order_lookup(self, order_id: str) -> tuple:
@@ -327,11 +453,11 @@ Use the provided knowledge base context to answer questions accurately. If you d
         else:
             # Order ID is syntactically valid but not in the CRM — escalate
             transcript = f"Customer was checking status for order {order_id} but it was not found in Airtable."
-            _, _ = self.handle_escalation(f"Order {order_id} not found.", transcript)
+            escalation_response, _ = self.handle_escalation(f"Order {order_id} not found.", transcript)
+            # Use handle_escalation's return value — it already gates success/failure wording correctly
             response = (
-                f"I couldn't find order **{order_id}** in our system. "
-                "I've flagged this to our support team — someone will check the warehouse and reply within 2 hours. "
-                "Is there anything else I can help you with?"
+                f"I couldn't find order {order_id} in our system. "
+                f"{escalation_response}"
             )
             return response, 'Escalated'
 
@@ -343,9 +469,44 @@ Use the provided knowledge base context to answer questions accurately. If you d
         return response, 'Resolved'
 
     def handle_returns_handoff(self, message: str) -> tuple:
-        """Handle Q7 - Returns handoff."""
-        response = "I can help you with your return! Please provide the following:\n1. Your name\n2. Order number\n3. Reason for return"
-        return response, 'RETURNS_COLLECTING'
+        """Handle Q7 — return/refund intent.
+
+        Distinguish policy queries (answer from KB) from start-a-return requests
+        (collect details).  Only enter RETURNS_COLLECTING when the user signals
+        they actually want to start a return.
+        """
+        msg_lower = message.lower()
+
+        # Signals that the user wants to START a return (not just ask about policy)
+        start_return_keywords = [
+            'i want to return', 'i need to return', 'start a return',
+            'process a return', 'wrong item', 'damaged item', 'sent wrong',
+            'i received the wrong', 'item is damaged', 'want a refund',
+            'need a refund', 'request a refund',
+        ]
+        wants_to_start = any(kw in msg_lower for kw in start_return_keywords)
+
+        if wants_to_start:
+            response = (
+                "I can help you with your return. Please provide the following details:\n"
+                "1. Your full name\n"
+                "2. Your order number\n"
+                "3. The reason for the return"
+            )
+            return response, 'RETURNS_COLLECTING'
+
+        # General return policy question — answer from knowledge base
+        policy_response = (
+            "Our return and exchange policy:\n\n"
+            "14-day window: You can return or exchange any item within 14 days of delivery.\n\n"
+            "Condition: Items must be unused, or defective/damaged upon arrival. "
+            "We are unable to accept returns for a change of mind if the product has been opened.\n\n"
+            "Exclusions: Opened products that show signs of use do not qualify.\n\n"
+            "Process: Contact us with your order number and reason. "
+            "Our team will review and get back to you within 24 hours.\n\n"
+            "Would you like to start a return? I can walk you through the process."
+        )
+        return policy_response, 'Resolved'
 
     def handle_returns_submission(self, customer_name: str, order_number: str, reason: str, email: str,
                                   item_unused: bool = True, packaging_available: bool = True) -> tuple:
@@ -477,6 +638,62 @@ Use the provided knowledge base context to answer questions accurately. If you d
 
         return item_unused, packaging_available
 
+    def _dispatch_intent(self, intent: str, action: str, message: str,
+                         new_state: dict, conversation_state: dict) -> tuple:
+        """Route a (intent, action) pair to the appropriate handler.
+
+        Extracted so that topic-change exit paths inside collecting-state blocks
+        can reach normal routing without duplicating the full elif chain.
+        Returns (response_str, updated_new_state_dict).
+        """
+        if action == 'greeting':
+            response, status = self.handle_greeting(message)
+            new_state['conversation_status'] = status
+
+        elif action == 'health_safety':
+            response, status = self.handle_health_safety(message)
+            new_state.pop('state', None)
+            new_state['conversation_status'] = status
+
+        elif action == 'quiz_handoff':
+            response, status = self.handle_quiz_handoff(message)
+            new_state['state'] = status
+            new_state['conversation_status'] = 'Pending'
+
+        elif action == 'query_order':
+            response, status = self.handle_query_order(message)
+            new_state['state'] = status
+            new_state['conversation_status'] = 'Pending'
+
+        elif action == 'query_delivery':
+            response, status = self.handle_query_delivery(message)
+            new_state['conversation_status'] = 'Resolved'
+
+        elif action == 'returns_handoff':
+            response, status = self.handle_returns_handoff(message)
+            new_state['state'] = status
+            new_state['conversation_status'] = 'Pending' if status != 'Resolved' else 'Resolved'
+
+        elif action == 'escalate':
+            response, status = self.handle_escalation(message, conversation_state.get('transcript', ''))
+            new_state['state'] = status
+            new_state['conversation_status'] = status
+
+        elif action == 'product_catalogue':
+            response, status = self.handle_product_catalogue(message)
+            new_state['conversation_status'] = status
+
+        elif action == 'query_knowledge':
+            response, status = self.handle_query_knowledge(message)
+            new_state['conversation_status'] = 'Resolved'
+
+        else:
+            # UNKNOWN intent — out of scope
+            response = self.handle_out_of_scope(message)
+            new_state['conversation_status'] = 'Resolved'
+
+        return response, new_state
+
     def process_message(self, message: str, conversation_state: dict = None) -> dict:
         """Main message processing function."""
         if conversation_state is None:
@@ -508,11 +725,36 @@ Use the provided knowledge base context to answer questions accurately. If you d
             'RETURNS_COLLECTING_REASON', 'RETURNS_COLLECTING_EMAIL',
             'RETURNS_COLLECTING_CONDITION',
         }
+        # Sets used for topic-change detection
+        RETURNS_STATES = {
+            'RETURNS_COLLECTING', 'RETURNS_COLLECTING_ORDER',
+            'RETURNS_COLLECTING_REASON', 'RETURNS_COLLECTING_EMAIL',
+            'RETURNS_COLLECTING_CONDITION',
+        }
+        # Intents that should always break out of a collecting flow
+        NON_CONTINUATION_INTENTS = {
+            'GREETING', 'Q1', 'Q2', 'Q4', 'Q6', 'Q8', 'Q9',
+            'Q10', 'HEALTH_SAFETY',
+        }
+
         if current_state in COLLECTING_STATES and self._is_cancellation(message):
             new_state.pop('state', None)
             new_state['conversation_status'] = 'Resolved'
+            new_state['transcript'] = conversation_state.get('transcript', '') + f"\nCustomer: {message}\nVera: No problem! Is there anything else I can help you with?"
             return {
                 'response': "No problem! Is there anything else I can help you with?",
+                'intent': intent,
+                'state': new_state,
+            }
+
+        # HEALTH_SAFETY always overrides any pending collecting state
+        if current_state in COLLECTING_STATES and intent == 'HEALTH_SAFETY':
+            new_state.pop('state', None)
+            response, status = self.handle_health_safety(message)
+            new_state['conversation_status'] = status
+            new_state['transcript'] = conversation_state.get('transcript', '') + f"\nCustomer: {message}\nVera: {response}"
+            return {
+                'response': self.strip_markdown(response),
                 'intent': intent,
                 'state': new_state,
             }
@@ -526,7 +768,7 @@ Use the provided knowledge base context to answer questions accurately. If you d
                 response = (
                     f"Thank you! Here is your personalized skin quiz link:\n"
                     f"👉 {quiz_url}\n\n"
-                    f"It takes just a minute to complete. Once you submit the quiz, reply **'done'** here and I'll retrieve your custom routine and prefilled cart right away!"
+                    f"It takes just a minute to complete. Once you submit the quiz, reply 'done' here and I'll retrieve your custom routine and prefilled cart right away!"
                 )
                 new_state['state'] = 'QUIZ_WAITING_COMPLETION'
                 new_state['conversation_status'] = 'Pending'
@@ -554,40 +796,84 @@ Use the provided knowledge base context to answer questions accurately. If you d
                 new_state['conversation_status'] = 'Pending'
 
         elif current_state == 'ORDER_COLLECTING':
-            order_id = message.strip()
-            if order_id:
-                response, status = self.handle_order_lookup(order_id)
-                new_state['state'] = status
-                new_state['conversation_status'] = status
-                new_state['order_id'] = order_id
+            # Topic-change guard: if user clearly changed topic, exit and handle new intent
+            if intent in NON_CONTINUATION_INTENTS:
+                new_state.pop('state', None)
+                new_state['conversation_status'] = 'Resolved'
+                response, new_state = self._dispatch_intent(intent, action, message, new_state, conversation_state)
             else:
-                response = "Please provide your order number so I can look it up for you."
-                new_state['state'] = 'ORDER_COLLECTING'
-                new_state['conversation_status'] = 'Pending'
+                # Stay in order-collecting flow — try to extract a valid order ID
+                order_id = self._extract_order_id(message)
+                if order_id:
+                    response, status = self.handle_order_lookup(order_id)
+                    new_state['state'] = status
+                    new_state['conversation_status'] = status
+                    new_state['order_id'] = order_id
+                else:
+                    response = (
+                        "I wasn't able to spot an order number in that message. "
+                        "Your order number is in your confirmation email — it usually looks like "
+                        "a short code or number. Could you paste it here?"
+                    )
+                    new_state['state'] = 'ORDER_COLLECTING'
+                    new_state['conversation_status'] = 'Pending'
 
         elif current_state == 'RETURNS_COLLECTING':
-            new_state['customer_name'] = message
-            response = "Thank you! What is your order number?"
-            new_state['state'] = 'RETURNS_COLLECTING_ORDER'
+            # Privacy preference: user doesn't want to share personal data
+            if self._is_privacy_preference(message):
+                new_state.pop('state', None)
+                response, _ = self.handle_returns_handoff('return policy')
+                new_state['conversation_status'] = 'Resolved'
+            # Topic-change guard: user switched to a different topic
+            elif intent in NON_CONTINUATION_INTENTS:
+                new_state.pop('state', None)
+                response, new_state = self._dispatch_intent(intent, action, message, new_state, conversation_state)
+            else:
+                new_state['customer_name'] = message
+                response = "Thank you! What is your order number?"
+                new_state['state'] = 'RETURNS_COLLECTING_ORDER'
 
         elif current_state == 'RETURNS_COLLECTING_ORDER':
-            new_state['order_number'] = message
-            response = "Got it. What is the reason for your return?"
-            new_state['state'] = 'RETURNS_COLLECTING_REASON'
+            # Topic-change / privacy guard
+            if self._is_privacy_preference(message):
+                new_state.pop('state', None)
+                response, _ = self.handle_returns_handoff('return policy')
+                new_state['conversation_status'] = 'Resolved'
+            elif intent in NON_CONTINUATION_INTENTS:
+                new_state.pop('state', None)
+                response, new_state = self._dispatch_intent(intent, action, message, new_state, conversation_state)
+            else:
+                new_state['order_number'] = message
+                response = "Got it. What is the reason for your return?"
+                new_state['state'] = 'RETURNS_COLLECTING_REASON'
 
         elif current_state == 'RETURNS_COLLECTING_REASON':
-            new_state['reason'] = self.classify_return_reason(message)
-            response = "Almost done! Please provide your email address so we can keep you updated."
-            new_state['state'] = 'RETURNS_COLLECTING_EMAIL'
+            # Topic-change guard
+            if intent in NON_CONTINUATION_INTENTS:
+                new_state.pop('state', None)
+                response, new_state = self._dispatch_intent(intent, action, message, new_state, conversation_state)
+            else:
+                new_state['reason'] = self.classify_return_reason(message)
+                response = "Almost done! Please provide your email address so we can keep you updated."
+                new_state['state'] = 'RETURNS_COLLECTING_EMAIL'
 
         elif current_state == 'RETURNS_COLLECTING_EMAIL':
-            new_state['email'] = message
-            response = (
-                "Almost done! Just two quick questions to confirm your return:\n"
-                "1. Is the item unused?\n"
-                "2. Do you still have the original packaging?"
-            )
-            new_state['state'] = 'RETURNS_COLLECTING_CONDITION'
+            # Privacy / topic-change guard
+            if self._is_privacy_preference(message):
+                new_state.pop('state', None)
+                response, _ = self.handle_returns_handoff('return policy')
+                new_state['conversation_status'] = 'Resolved'
+            elif intent in NON_CONTINUATION_INTENTS:
+                new_state.pop('state', None)
+                response, new_state = self._dispatch_intent(intent, action, message, new_state, conversation_state)
+            else:
+                new_state['email'] = message
+                response = (
+                    "Almost done! Just two quick questions to confirm your return:\n"
+                    "1. Is the item unused?\n"
+                    "2. Do you still have the original packaging?"
+                )
+                new_state['state'] = 'RETURNS_COLLECTING_CONDITION'
 
         elif current_state == 'RETURNS_COLLECTING_CONDITION':
             item_unused, packaging_available = self.classify_item_condition(message)
@@ -606,42 +892,7 @@ Use the provided knowledge base context to answer questions accurately. If you d
 
         else:
             # Normal intent routing (no active multi-step flow)
-            if action == 'greeting':
-                response, status = self.handle_greeting(message)
-                new_state['conversation_status'] = status
-
-            elif action == 'quiz_handoff':
-                response, status = self.handle_quiz_handoff(message)
-                new_state['state'] = status
-                new_state['conversation_status'] = 'Pending'
-
-            elif action == 'query_order':
-                response, status = self.handle_query_order(message)
-                new_state['state'] = status
-                new_state['conversation_status'] = 'Pending'
-
-            elif action == 'query_delivery':
-                response, status = self.handle_query_delivery(message)
-                new_state['conversation_status'] = 'Resolved'
-
-            elif action == 'returns_handoff':
-                response, status = self.handle_returns_handoff(message)
-                new_state['state'] = status
-                new_state['conversation_status'] = 'Pending'
-
-            elif action == 'escalate':
-                response, status = self.handle_escalation(message, conversation_state.get('transcript', ''))
-                new_state['state'] = status
-                new_state['conversation_status'] = status
-
-            elif action == 'query_knowledge':
-                response, status = self.handle_query_knowledge(message)
-                new_state['conversation_status'] = 'Resolved'
-
-            else:
-                # UNKNOWN intent — out of scope
-                response = self.handle_out_of_scope(message)
-                new_state['conversation_status'] = 'Resolved'
+            response, new_state = self._dispatch_intent(intent, action, message, new_state, conversation_state)
 
         # Check for escalation keyword injected by LLM in its response
         if 'ESCALATE_VERA' in response:
@@ -651,7 +902,7 @@ Use the provided knowledge base context to answer questions accurately. If you d
                 transcript = conversation_state.get('transcript', '') + f"\nCustomer: {message}\nVera: {response}"
                 success = self.escalation.send_escalation_email(transcript, reference, message)
                 if success:
-                    response += f"\n\nI've flagged your case to our support team. Reference: **#{reference}**. Someone will contact you within 24 hours."
+                    response += f"\n\nI've flagged your case to our support team. Reference: #{reference}. Someone will contact you within 24 hours."
                 else:
                     response += "\n\nPlease contact our support team directly at verdantskinco.ng@gmail.com."
             else:
@@ -663,7 +914,7 @@ Use the provided knowledge base context to answer questions accurately. If you d
         new_state['transcript'] = conversation_state.get('transcript', '') + f"\nCustomer: {message}\nVera: {response}"
 
         return {
-            'response': response,
+            'response': self.strip_markdown(response),
             'intent': intent,
             'state': new_state
         }
