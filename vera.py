@@ -275,8 +275,10 @@ Use the provided knowledge base context to answer questions accurately. If you d
         text = re.sub(r'_(.+?)_', r'\1', text, flags=re.DOTALL)
         # Remove heading markers (# at start of line)
         text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
-        # Remove horizontal rules
+        # Remove horizontal rules (lines of 3+ dashes, asterisks, or underscores)
         text = re.sub(r'^[-*_]{3,}\s*$', '', text, flags=re.MULTILINE)
+        # Convert Markdown bullet markers to Unicode bullet character for readability
+        text = re.sub(r'^[-*]\s+', '\u2022 ', text, flags=re.MULTILINE)
         # Collapse 3+ consecutive blank lines to 2
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text.strip()
@@ -537,7 +539,7 @@ Use the provided knowledge base context to answer questions accurately. If you d
         success = self.escalation.send_escalation_email(transcript, reference, message)
 
         if success:
-            response = f"I've flagged your case to our support team. Reference: **#{reference}**. Someone will contact you within 24 hours."
+            response = f"I've flagged your case to our support team. Reference: #{reference}. Someone will contact you within 24 hours."
         else:
             response = "I'm having trouble reaching our support system right now. Please email us directly at verdantskinco.ng@gmail.com and we'll get back to you within 24 hours."
 
@@ -731,9 +733,12 @@ Use the provided knowledge base context to answer questions accurately. If you d
             'RETURNS_COLLECTING_REASON', 'RETURNS_COLLECTING_EMAIL',
             'RETURNS_COLLECTING_CONDITION',
         }
-        # Intents that should always break out of a collecting flow
+        # Intents that should always break out of a collecting flow.
+        # Q3 (quiz/recommendation) and Q7 (returns) are included so that a user
+        # in ORDER_COLLECTING who says "I want to return something" exits the
+        # order flow, and a user who says "take the quiz" also exits cleanly.
         NON_CONTINUATION_INTENTS = {
-            'GREETING', 'Q1', 'Q2', 'Q4', 'Q6', 'Q8', 'Q9',
+            'GREETING', 'Q1', 'Q2', 'Q3', 'Q4', 'Q6', 'Q7', 'Q8', 'Q9',
             'Q10', 'HEALTH_SAFETY',
         }
 
@@ -848,8 +853,13 @@ Use the provided knowledge base context to answer questions accurately. If you d
                 new_state['state'] = 'RETURNS_COLLECTING_REASON'
 
         elif current_state == 'RETURNS_COLLECTING_REASON':
+            # Privacy preference: user doesn't want to share reason
+            if self._is_privacy_preference(message):
+                new_state.pop('state', None)
+                response, _ = self.handle_returns_handoff('return policy')
+                new_state['conversation_status'] = 'Resolved'
             # Topic-change guard
-            if intent in NON_CONTINUATION_INTENTS:
+            elif intent in NON_CONTINUATION_INTENTS:
                 new_state.pop('state', None)
                 response, new_state = self._dispatch_intent(intent, action, message, new_state, conversation_state)
             else:
@@ -876,19 +886,28 @@ Use the provided knowledge base context to answer questions accurately. If you d
                 new_state['state'] = 'RETURNS_COLLECTING_CONDITION'
 
         elif current_state == 'RETURNS_COLLECTING_CONDITION':
-            item_unused, packaging_available = self.classify_item_condition(message)
-            new_state['item_unused'] = item_unused
-            new_state['packaging_available'] = packaging_available
-            response, status = self.handle_returns_submission(
-                conversation_state.get('customer_name', ''),
-                conversation_state.get('order_number', ''),
-                conversation_state.get('reason', ''),
-                conversation_state.get('email', ''),
-                item_unused=item_unused,
-                packaging_available=packaging_available
-            )
-            new_state['state'] = status
-            new_state['conversation_status'] = status
+            # Privacy preference or topic-change guard
+            if self._is_privacy_preference(message):
+                new_state.pop('state', None)
+                response, _ = self.handle_returns_handoff('return policy')
+                new_state['conversation_status'] = 'Resolved'
+            elif intent in NON_CONTINUATION_INTENTS:
+                new_state.pop('state', None)
+                response, new_state = self._dispatch_intent(intent, action, message, new_state, conversation_state)
+            else:
+                item_unused, packaging_available = self.classify_item_condition(message)
+                new_state['item_unused'] = item_unused
+                new_state['packaging_available'] = packaging_available
+                response, status = self.handle_returns_submission(
+                    conversation_state.get('customer_name', ''),
+                    conversation_state.get('order_number', ''),
+                    conversation_state.get('reason', ''),
+                    conversation_state.get('email', ''),
+                    item_unused=item_unused,
+                    packaging_available=packaging_available
+                )
+                new_state['state'] = status
+                new_state['conversation_status'] = status
 
         else:
             # Normal intent routing (no active multi-step flow)
