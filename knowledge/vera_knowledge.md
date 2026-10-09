@@ -6,7 +6,6 @@ This is your source of truth. When answering a customer, search this document fo
 ## Q1 & Q10: Order Status & Inventory
 Trigger Words: where is my order, track, arrived, late, in stock, sold out, restock
 
-- **Order Numbers**: All order numbers must start with `VSC-` (e.g., VSC-1234).
 - **Tracking an Order**: If a customer asks for order status, ask for their order number. If you cannot find their status, tell them you are escalating it to a human agent who will check the warehouse and reply within 2 hours.
 - **Inventory Status**: All products listed in the catalog below are currently **In Stock** unless otherwise specified.
 

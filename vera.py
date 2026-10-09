@@ -392,11 +392,25 @@ Use the provided knowledge base context to answer questions accurately. If you d
         if match:
             return match.group(1)
 
-        # 3. Standalone or embedded alphanumeric token containing digits (e.g. 18926617756013, VSC1001)
+        # 3. Standalone or embedded alphanumeric token that looks like an order ID:
+        #    - purely numeric and at least 5 digits (e.g. long Shopify-style IDs like 18926617756013)
+        #    - OR mixed alphanumeric where digits make up less than 80% of chars (avoids "2hours", "3items")
         for token in text.split():
             clean_tok = token.strip('?.!,;:()[]{}"\'')
-            if re.match(r'^[A-Za-z0-9#-]{3,}$', clean_tok) and any(c.isdigit() for c in clean_tok):
-                return clean_tok.upper() if not clean_tok.startswith('#') else clean_tok
+            if not re.match(r'^[A-Za-z0-9#-]{3,}$', clean_tok):
+                continue
+            digits = sum(c.isdigit() for c in clean_tok)
+            letters = sum(c.isalpha() for c in clean_tok)
+            total = len(clean_tok)
+            # Pure digits: require at least 5 (short numbers like "3" or "12" are not IDs)
+            if letters == 0 and digits >= 5:
+                return clean_tok
+            # Mixed alphanumeric: must have both letters and digits
+            if letters > 0 and digits > 0:
+                # Skip tokens where digits dominate and it looks like a quantity/time word
+                digit_ratio = digits / total
+                if digit_ratio < 0.8:
+                    return clean_tok.upper()
 
         return None
 
